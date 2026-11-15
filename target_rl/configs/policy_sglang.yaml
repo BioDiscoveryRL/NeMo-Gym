@@ -1,0 +1,17 @@
+# Policy model served by SGLang (Qwen3.8-27B as "discovery-rl"), with the token information training needs.
+# Endpoint, model name and key come from env.yaml (policy_base_url, policy_model_name, policy_api_key), so the same
+# config points at Modal, a dedicated GPU box or NeMo RL's own server by changing env.yaml only.
+policy_model:
+  responses_api_models:
+    vllm_model:
+      entrypoint: app.py
+      base_url: ${policy_base_url}
+      api_key: ${policy_api_key}
+      model: ${policy_model_name}
+      return_token_id_information: true
+      request_prompt_and_generation_token_ids: false
+      uses_reasoning_parser: true
+      sglang_token_fields: true
+      extra_body:
+        chat_template_kwargs:
+          enable_thinking: true

@@ -1,0 +1,57 @@
+# Drug-target discovery in simulated biobank worlds: one sandbox per episode, one bash tool, scored by the
+# BioDiscoveryRL scorer. Each episode sees only its own world (world_mounts). BDRL_WORLDS_ROOT is the host folder
+# with the dataset layout (worlds/<id>/, shared/genes): data/biodiscoveryrl locally or on a GPU box. Build the toolkit image first:
+#   docker build --platform=linux/amd64 -t bdrl-toolkit:latest resources_servers/biodiscovery/toolkit
+biodiscovery:
+  resources_servers:
+    biodiscovery:
+      entrypoint: app.py
+      domain: agent
+      verified: false
+      description: Open drug-target discovery in a simulated multi-omic biobank world
+      sandbox_provider: sandbox
+      image: ${oc.env:BDRL_TOOLKIT_IMAGE,bdrl-toolkit:latest}
+      # Docker: BDRL_WORLDS_ROOT is the host folder with the dataset layout. Only the episode's world is mounted.
+      world_mounts:
+        - ${oc.env:BDRL_WORLDS_ROOT}/worlds/{world_id}:/worlds/worlds/{world_id}:ro
+        - ${oc.env:BDRL_WORLDS_ROOT}/shared/genes:/worlds/shared/genes:ro
+      sandbox_resources:
+        cpu: 4
+        memory_mib: 8192
+      command_timeout_seconds: 600
+      max_output_chars: 8000
+      step_budget: 40
+biodiscovery_simple_agent:
+  responses_api_agents:
+    simple_agent:
+      entrypoint: app.py
+      max_steps: 40
+      resources_server:
+        type: resources_servers
+        name: biodiscovery
+      model_server:
+        type: responses_api_models
+        name: policy_model
+      datasets:
+      - name: overfit
+        type: train
+        # The Hugging Face dataset card lists the license as "other", which is not in the accepted list.
+        license: TBD
+        jsonl_fpath: target_rl/data/biodiscovery/train.jsonl
+      - name: heldout
+        type: validation
+        # The Hugging Face dataset card lists the license as "other", which is not in the accepted list.
+        license: TBD
+        jsonl_fpath: target_rl/data/biodiscovery/validation.jsonl
+biodiscovery_environment_server:
+  environment_servers:
+    single_agent_turn_legacy:
+      entrypoint: app.py
+      resources_server:
+        type: resources_servers
+        name: biodiscovery
+      agent_server:
+        type: responses_api_agents
+        name: biodiscovery_simple_agent
+      resources_tool_transports:
+      - direct_http

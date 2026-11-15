@@ -1,0 +1,27 @@
+# Episode sandboxes on the local Docker daemon: no network, no capabilities, bounded processes.
+# Pass alongside resources_servers/biodiscovery/configs/biodiscovery.yaml; a provider config for another runtime
+# (for example Modal) binds the same `sandbox` name and replaces this file.
+sandbox:
+  default_metadata:
+    sandbox-api: docker-cli
+  docker:
+    create:
+      keepalive_shell: /bin/sh
+      keepalive_cmd: "while :; do sleep 2147483647; done"
+      start_timeout_s: 600
+      use_init: true
+      apply_resource_limits: true
+      network: none
+      cap_drop: ["ALL"]
+      security_opt: ["no-new-privileges"]
+      pids_limit: 1024
+    exec:
+      default_timeout_s: 600
+      concurrency: 64
+      exec_shell: /bin/bash
+    probe:
+      command: printf docker-sandbox-ready
+      expected_stdout: docker-sandbox-ready
+      timeout_s: 30
+      deadline_s: 60
+      stable_count: 1

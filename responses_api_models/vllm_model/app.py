@@ -606,6 +606,14 @@ class VLLMModelConfig(BaseResponsesAPIModelConfig):
     # ``uses_reasoning_parser``.
     preserve_reasoning_in_assistant_content: bool = False
     replace_developer_role_with_system: bool = False
+    sglang_token_fields: bool = Field(
+        default=False,
+        description=(
+            "The endpoint is SGLang, which returns token information as choice.prompt_token_ids, "
+            "choice.response_token_ids and logprob tokens as text. On, each chat completion is rewritten into the "
+            "vLLM shape (top-level prompt_token_ids, choice.token_ids, `token_id:<int>` logprob tokens) before parsing."
+        ),
+    )
 
     drop_unrepresentable_request_fields: bool = Field(
         default=False,
@@ -1561,7 +1569,8 @@ class VLLMModel(SimpleResponsesAPIModel):
                 # Typically passed via OpenAI client extra_body.
                 return_tokens_as_token_ids=True,
             )
-            if self.config.request_prompt_and_generation_token_ids:
+            # SGLang reports logprob tokens as text, so its token ids come only from return_token_ids.
+            if self.config.request_prompt_and_generation_token_ids or self.config.sglang_token_fields:
                 body_dict["return_token_ids"] = True
 
         if self.config.uses_reasoning_parser and not self.config.preserve_reasoning_in_assistant_content:
@@ -1963,8 +1972,8 @@ class VLLMModel(SimpleResponsesAPIModel):
             transport_options["_headers"] = {**transport_options.get("_headers", {}), **extra_headers}
         try:
             try:
-                chat_completion_dict = await self._call_endpoint(
-                    client, client.create_chat_completion(**transport_options, **body_dict)
+                chat_completion_dict = self._vllm_token_fields(
+                    await self._call_endpoint(client, client.create_chat_completion(**transport_options, **body_dict))
                 )
             except ClientResponseError as refusal:
                 if not await self._refit_output_budget(
@@ -1978,8 +1987,8 @@ class VLLMModel(SimpleResponsesAPIModel):
                     lambda: VLLMModel._get_tokenize_chat_body(body_dict),
                 ):
                     raise
-                chat_completion_dict = await self._call_endpoint(
-                    client, client.create_chat_completion(**transport_options, **body_dict)
+                chat_completion_dict = self._vllm_token_fields(
+                    await self._call_endpoint(client, client.create_chat_completion(**transport_options, **body_dict))
                 )
         except ClientResponseError as e:
             execution.update(response_source="upstream", upstream_status_code=e.status)
@@ -2865,6 +2874,34 @@ class VLLMModel(SimpleResponsesAPIModel):
             return False
         health.failed_at = now
         return True
+
+    def _vllm_token_fields(self, chat_completion_dict: Dict[str, Any]) -> Dict[str, Any]:
+        """Rewrite an SGLang chat completion's token information into the vLLM shape the parser expects.
+
+        SGLang puts prompt ids on each choice and generated ids in ``response_token_ids``, and returns logprob
+        tokens as text. The parser reads top-level ``prompt_token_ids``, ``choice.token_ids`` and
+        ``token_id:<int>`` logprob tokens. A response without SGLang token fields is returned unchanged.
+        """
+        if not self.config.sglang_token_fields:
+            return chat_completion_dict
+        for choice in chat_completion_dict.get("choices") or []:
+            generated = choice.pop("response_token_ids", None)
+            if generated is None:
+                continue
+            prompt = choice.pop("prompt_token_ids", None)
+            if prompt is not None:
+                chat_completion_dict.setdefault("prompt_token_ids", prompt)
+            choice["token_ids"] = generated
+            content = (choice.get("logprobs") or {}).get("content")
+            if isinstance(content, list):
+                if len(content) != len(generated):
+                    raise RuntimeError(
+                        f"SGLang returned {len(generated)} response_token_ids but {len(content)} logprob entries; "
+                        "cannot pair token ids with logprobs."
+                    )
+                for entry, token_id in zip(content, generated):
+                    entry["token"] = f"token_id:{token_id}"
+        return chat_completion_dict
 
     async def _call_endpoint(self, client: NeMoGymAsyncOpenAI, call: Awaitable[Dict[str, Any]]) -> Dict[str, Any]:
         """Await one engine call and record how the endpoint answered.
