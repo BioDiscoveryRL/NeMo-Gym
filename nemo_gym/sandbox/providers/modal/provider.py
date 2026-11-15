@@ -136,12 +136,21 @@ class ModalProvider:
         timeout = timeout_s if timeout_s is not None else self._default_timeout_s
         async with self._semaphore:
             try:
+                # Bytes, decoded here: a command that prints binary (a gzipped file, say) must not fail the read.
                 process = await sandbox.exec.aio(
-                    "bash", "-c", command, workdir=cwd or handle.raw["workdir"], env=env or None, timeout=int(timeout)
+                    "bash",
+                    "-c",
+                    command,
+                    workdir=cwd or handle.raw["workdir"],
+                    env=env or None,
+                    timeout=int(timeout),
+                    text=False,
                 )
-                stdout, stderr = await asyncio.wait_for(
+                stdout_bytes, stderr_bytes = await asyncio.wait_for(
                     asyncio.gather(process.stdout.read.aio(), process.stderr.read.aio()), timeout=timeout + 30
                 )
+                stdout = stdout_bytes.decode("utf-8", errors="replace")
+                stderr = stderr_bytes.decode("utf-8", errors="replace")
                 return_code = await process.wait.aio()
             except (TimeoutError, asyncio.TimeoutError):
                 return SandboxExecResult(
