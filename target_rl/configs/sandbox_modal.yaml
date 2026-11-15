@@ -1,0 +1,14 @@
+# Episode sandboxes as Modal Sandboxes, for training inside Modal GPU containers where Docker is unavailable.
+# Replaces sandbox_docker.yaml (same `sandbox` name). Set BDRL_WORLDS_ROOT to the Modal Volume holding the worlds
+# (target-rl-worlds); the biodiscovery server mounts it read-only at /worlds.
+sandbox:
+  default_metadata:
+    sandbox-api: modal
+  modal:
+    app_name: target-rl-episodes
+    block_network: true
+    images:
+      "bdrl-toolkit:latest":
+        dockerfile: resources_servers/biodiscovery/toolkit/Dockerfile
+    default_timeout_s: 600
+    concurrency: 128
