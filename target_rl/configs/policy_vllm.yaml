@@ -1,0 +1,16 @@
+# Policy model served by a vLLM OpenAI-compatible server (for example `vllm serve Qwen/Qwen3.8-27B` on a local GPU
+# box), for evaluation rollouts. Endpoint, model name and key come from env.yaml or overrides (policy_base_url,
+# policy_model_name, policy_api_key). Start vLLM with the Qwen parsers so tool calls and thinking come back
+# structured: --enable-auto-tool-choice --tool-call-parser qwen3_coder --reasoning-parser qwen3
+policy_model:
+  responses_api_models:
+    vllm_model:
+      entrypoint: app.py
+      base_url: ${policy_base_url}
+      api_key: ${policy_api_key}
+      model: ${policy_model_name}
+      return_token_id_information: false
+      uses_reasoning_parser: true
+      extra_body:
+        chat_template_kwargs:
+          enable_thinking: true
