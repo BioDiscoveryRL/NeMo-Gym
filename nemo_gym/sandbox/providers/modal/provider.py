@@ -15,8 +15,9 @@
 """Modal Sandboxes as NeMo Gym sandboxes.
 
 One Modal Sandbox per Gym sandbox, kept alive with `sleep infinity` and driven with `exec`. Use it where Docker is
-unavailable, such as inside Modal GPU containers. Images: a name listed under `images` is built from that Dockerfile
-(paths relative to the NeMo Gym checkout); any other name is pulled from its registry. Volumes in
+unavailable, such as inside Modal GPU containers. Images: a name listed under `images` resolves to a published Modal
+image (`published: <name>`, no build at launch) or is built from a Dockerfile (`dockerfile: <path>`, relative to the
+NeMo Gym checkout); any other name is pulled from its registry. Volumes in
 `provider_options["volumes"]` use the Docker form `src:dst[:ro]`, with `src` naming a Modal Volume.
 """
 
@@ -71,6 +72,8 @@ class ModalProvider:
             source = self._image_sources.get(name)
             if source is None:
                 self._images[name] = self._modal.Image.from_registry(name)
+            elif "published" in source:
+                self._images[name] = self._modal.Image.from_name(source["published"])
             else:
                 dockerfile = Path(source["dockerfile"])
                 dockerfile = dockerfile if dockerfile.is_absolute() else GYM_ROOT / dockerfile

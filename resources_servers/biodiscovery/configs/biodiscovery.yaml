@@ -1,6 +1,6 @@
 # Drug-target discovery in simulated biobank worlds: one sandbox per episode, one bash tool, scored by the
-# BioDiscoveryRL scorer. BDRL_WORLDS_ROOT is the host folder with the dataset layout (worlds/<id>/, shared/genes):
-# data/biodiscoveryrl locally or on a GPU box. Build the toolkit image first:
+# BioDiscoveryRL scorer. Each episode sees only its own world (world_mounts). BDRL_WORLDS_ROOT is the host folder
+# with the dataset layout (worlds/<id>/, shared/genes): data/biodiscoveryrl locally or on a GPU box. Build the toolkit image first:
 #   docker build --platform=linux/amd64 -t bdrl-toolkit:latest resources_servers/biodiscovery/toolkit
 biodiscovery:
   resources_servers:
@@ -11,7 +11,10 @@ biodiscovery:
       description: Open drug-target discovery in a simulated multi-omic biobank world
       sandbox_provider: sandbox
       image: ${oc.env:BDRL_TOOLKIT_IMAGE,bdrl-toolkit:latest}
-      worlds_root: ${oc.env:BDRL_WORLDS_ROOT}
+      # Docker: BDRL_WORLDS_ROOT is the host folder with the dataset layout. Only the episode's world is mounted.
+      world_mounts:
+        - ${oc.env:BDRL_WORLDS_ROOT}/worlds/{world_id}:/worlds/worlds/{world_id}:ro
+        - ${oc.env:BDRL_WORLDS_ROOT}/shared/genes:/worlds/shared/genes:ro
       sandbox_resources:
         cpu: 4
         memory_mib: 8192

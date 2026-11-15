@@ -15,7 +15,8 @@
 """Drug-target discovery in a simulated biobank world, one sandbox per episode.
 
 Each episode runs in its own sandbox (NeMo Gym sandbox layer, Docker by default) built from the analysis toolkit
-image, with no network, the worlds mounted read-only at /worlds and a writable trial folder at /trial. The agent works
+image, with no network, only its own world mounted read-only (plus the shared gene annotation) and a writable trial
+folder at /trial. Seeding fails if the sandbox can see any other world. The agent works
 through a single `bash` tool; the episode's paths are environment variables in the sandbox ($DBGAP, $REFERENCE,
 $TRIAL, $SCRATCH). The agent commits by writing $TRIAL/committed/run_summary.json; `verify` reads it out of the
 sandbox and scores it with the BioDiscoveryRL scorer (`tasks.scoring`) against the task's answer key, which travels
@@ -65,8 +66,10 @@ class BioDiscoveryResourcesServerConfig(BaseResourcesServerConfig):
     """Top-level provider block in the global config (Docker by default; see configs/biodiscovery.yaml)."""
     image: str = "bdrl-toolkit:latest"
     """Analysis toolkit image (toolkit/Dockerfile): python with pandas etc., plink2, bcftools, an unprivileged user."""
-    worlds_root: str
-    """Host folder with the dataset layout (worlds/<world_id>/{dbGaP,wgs}, shared/genes), mounted read-only."""
+    world_mounts: list[str]
+    """Read-only mounts for one episode, as provider volume specs `src:dst:ro` with `{world_id}` filled in. Each
+    episode must see exactly its own world at /worlds/worlds/{world_id} and the gene annotation at /worlds/shared/genes:
+    for Docker, host subfolders of the dataset; for Modal, one Volume per world."""
     sandbox_resources: dict[str, Any] = Field(default_factory=lambda: {"cpu": 4, "memory_mib": 8192})
     sandbox_ttl_seconds: int = 6 * 60 * 60
     command_timeout_seconds: int = 600
@@ -93,6 +96,16 @@ class BioDiscoveryVerifyResponse(BaseVerifyResponse):
 class _Episode:
     sandbox: AsyncSandbox
     steps: int = 0
+
+
+def world_mounts(templates: list[str], world_id: str) -> list[str]:
+    """The episode's read-only volume specs; every mount must be read-only and land under /worlds."""
+    mounts = [t.format(world_id=world_id) for t in templates]
+    for mount in mounts:
+        parts = mount.split(":")
+        if len(parts) != 3 or parts[2] != "ro" or not parts[1].startswith(f"{WORLDS}/"):
+            raise ValueError(f"world mount must be read-only under {WORLDS}/ as src:dst:ro, got {mount!r}")
+    return mounts
 
 
 def _clip(text: str, limit: int) -> str:
@@ -145,12 +158,14 @@ class BioDiscoveryResourcesServer(SimpleResourcesServer):
             resources=SandboxResources.from_mapping(self.config.sandbox_resources),
             metadata=resolve_provider_metadata(self.config.sandbox_provider, global_config)
             | {"nemo_gym_agent": self.config.name, "world_id": world_id, "session": session_id[:63]},
-            provider_options={"volumes": [f"{self.config.worlds_root}:{WORLDS}:ro"]},
+            provider_options={"volumes": world_mounts(self.config.world_mounts, world_id)},
         )
         sandbox = AsyncSandbox(resolve_provider_config(self.config.sandbox_provider, global_config))
         await sandbox.start(spec)
+        # The only world visible must be this episode's: anything else in /worlds/worlds fails the seed.
         setup = (
-            f"test -d {shlex.quote(world)}/dbGaP && test -d {shlex.quote(world)}/wgs"
+            f'test "$(ls -A {WORLDS}/worlds)" = {shlex.quote(world_id)}'
+            f" && test -d {shlex.quote(world)}/dbGaP && test -d {shlex.quote(world)}/wgs"
             f" && mkdir -p {TRIAL}/workspace {TRIAL}/committed {TRIAL}/scratch {TRIAL}/.reference"
             f" && ln -sfn {shlex.quote(world)}/wgs {TRIAL}/.reference/wgs"
             f" && ln -sfn {WORLDS}/shared/genes {TRIAL}/.reference/genes"
@@ -158,7 +173,13 @@ class BioDiscoveryResourcesServer(SimpleResourcesServer):
         result = await sandbox.exec(setup, cwd="/", timeout_s=60)
         if result.return_code != 0 or result.error_type is not None:
             await sandbox.stop()
-            raise HTTPException(503, f"sandbox setup for world {world_id} failed: {result.stderr or result.error_type}")
+            visible = (await sandbox.exec(f"ls -A {WORLDS}/worlds", cwd="/", timeout_s=60)).stdout
+            await sandbox.stop()
+            raise HTTPException(
+                503,
+                f"sandbox setup for world {world_id} failed (visible worlds: {(visible or '').split()}): "
+                f"{result.stderr or result.error_type}",
+            )
         return sandbox
 
     def _episode(self, request: Request) -> _Episode:

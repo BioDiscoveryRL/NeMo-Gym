@@ -8,7 +8,9 @@ sandbox:
     app_name: target-rl-episodes
     block_network: true
     images:
+      # Published by nemo-RL examples/nemo_gym/target_rl/modal_images.py; swap for
+      # `dockerfile: resources_servers/biodiscovery/toolkit/Dockerfile` to build at first use instead.
       "bdrl-toolkit:latest":
-        dockerfile: resources_servers/biodiscovery/toolkit/Dockerfile
+        published: bdrl-toolkit
     default_timeout_s: 600
     concurrency: 128
