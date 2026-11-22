@@ -14,7 +14,7 @@ ARG REGENIE_X86_ZIP=https://github.com/rgcgithub/regenie/releases/download/v3.4.
 ARG BGEN_TGZ=https://enkre.net/cgi-bin/code/bgen/tarball/release/v1.1.7/bgen.tgz
 RUN set -eux; apt-get update; \
     if [ "${TARGETARCH:-amd64}" = "amd64" ]; then \
-        apt-get install -y --no-install-recommends curl unzip ca-certificates; \
+        apt-get install -y --no-install-recommends curl unzip ca-certificates libgomp1; \
         curl -fsSL -o /tmp/regenie.zip "$REGENIE_X86_ZIP"; unzip -q /tmp/regenie.zip -d /tmp/regenie; \
         install -m 0755 "$(find /tmp/regenie -type f | head -1)" /usr/local/bin/regenie; \
     else \
